@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
+import requests
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -28,6 +29,7 @@ from integrations.imports import (
     kitsu,
     mal,
     simkl,
+    steam,
     yamtrack,
 )
 from integrations.imports.trakt import TraktImporter, importer
@@ -765,3 +767,207 @@ class HelpersTest(TestCase):
 
         schedule = CrontabSchedule.objects.first()
         self.assertEqual(schedule.day_of_week, "*/2")
+
+
+class ImportSteam(TestCase):
+    """Test importing games from Steam."""
+
+    def setUp(self):
+        """Create user for the tests."""
+        self.credentials = {"username": "test", "password": "12345"}
+        self.user = get_user_model().objects.create_user(**self.credentials)
+
+    @patch("requests.get")
+    @patch("app.providers.services.search_media")
+    @patch("django.conf.settings.STEAM_API_KEY", "test-api-key")
+    def test_import_steam_games_success(self, mock_search, mock_request):
+        """Test successful Steam games import."""
+        # Mock Steam API response
+        with open(mock_path / "steam_games.json") as f:
+            steam_data = json.load(f)
+        
+        mock_response = Mock()
+        mock_response.json.return_value = steam_data
+        mock_response.raise_for_status.return_value = None
+        mock_request.return_value = mock_response
+
+        # Mock IGDB search - return empty for simplicity
+        mock_search.return_value = []
+
+        # Import Steam games
+        imported_counts, warnings = steam.importer("76561197960435530", self.user, "new")
+
+        # Verify API was called correctly
+        mock_request.assert_called_once()
+        call_args = mock_request.call_args
+        self.assertIn("steamid=76561197960435530", call_args[1]["params"]["steamid"])
+        self.assertIn("key=test-api-key", call_args[1]["params"]["key"])
+
+        # Verify games were imported
+        self.assertEqual(imported_counts[MediaTypes.GAME.value], 3)
+        self.assertEqual(Game.objects.filter(user=self.user).count(), 3)
+
+        # Check specific game data
+        dota2 = Game.objects.filter(
+            item__title="Dota 2"
+        ).first()
+        self.assertIsNotNone(dota2)
+        self.assertEqual(dota2.status, Status.PLAYING.value)  # Has recent playtime
+        self.assertEqual(dota2.progress, 12345)  # Total playtime stored
+
+        tf2 = Game.objects.filter(
+            item__title="Team Fortress 2"
+        ).first()
+        self.assertIsNotNone(tf2)
+        self.assertEqual(tf2.status, Status.COMPLETED.value)  # No recent playtime
+
+        cs2 = Game.objects.filter(
+            item__title="Counter-Strike 2"
+        ).first()
+        self.assertIsNotNone(cs2)
+        self.assertEqual(cs2.status, Status.PLAN_TO_PLAY.value)  # No playtime
+
+    @patch("requests.get")
+    @patch("django.conf.settings.STEAM_API_KEY", "test-api-key")
+    def test_import_steam_empty_library(self, mock_request):
+        """Test importing from Steam user with no games."""
+        # Mock empty Steam API response
+        with open(mock_path / "steam_empty.json") as f:
+            steam_data = json.load(f)
+        
+        mock_response = Mock()
+        mock_response.json.return_value = steam_data
+        mock_response.raise_for_status.return_value = None
+        mock_request.return_value = mock_response
+
+        # Import Steam games
+        imported_counts, warnings = steam.importer("76561197960435530", self.user, "new")
+
+        # Verify no games were imported
+        self.assertEqual(imported_counts, {})
+        self.assertEqual(Game.objects.filter(user=self.user).count(), 0)
+
+    @patch("requests.get")
+    @patch("django.conf.settings.STEAM_API_KEY", "test-api-key")
+    def test_import_steam_private_profile(self, mock_request):
+        """Test importing from private Steam profile."""
+        # Mock private profile response
+        with open(mock_path / "steam_private.json") as f:
+            steam_data = json.load(f)
+        
+        mock_response = Mock()
+        mock_response.json.return_value = steam_data
+        mock_response.raise_for_status.return_value = None
+        mock_request.return_value = mock_response
+
+        # Import Steam games
+        imported_counts, warnings = steam.importer("76561197960435530", self.user, "new")
+
+        # Verify no games were imported
+        self.assertEqual(imported_counts, {})
+        self.assertEqual(Game.objects.filter(user=self.user).count(), 0)
+
+    @patch("requests.get")
+    def test_import_steam_api_error(self, mock_request):
+        """Test Steam API error handling."""
+        # Mock 403 error (private profile or invalid key)
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError()
+        mock_request.return_value = mock_response
+
+        # Import should raise MediaImportError
+        with self.assertRaises(steam.MediaImportError):
+            steam.importer("76561197960435530", self.user, "new")
+
+    @patch("django.conf.settings.STEAM_API_KEY", None)
+    def test_import_steam_no_api_key(self):
+        """Test importing without Steam API key configured."""
+        # Import should raise MediaImportError
+        with self.assertRaises(steam.MediaImportError) as context:
+            steam.importer("76561197960435530", self.user, "new")
+        
+        self.assertIn("Steam API key not configured", str(context.exception))
+
+    @patch("requests.get")
+    @patch("app.providers.services.search_media")
+    @patch("django.conf.settings.STEAM_API_KEY", "test-api-key")
+    def test_import_steam_with_igdb_match(self, mock_search, mock_request):
+        """Test Steam import with IGDB game matching."""
+        # Mock Steam API response
+        with open(mock_path / "steam_games.json") as f:
+            steam_data = json.load(f)
+        
+        mock_response = Mock()
+        mock_response.json.return_value = steam_data
+        mock_response.raise_for_status.return_value = None
+        mock_request.return_value = mock_response
+
+        # Mock IGDB search to return a match for Dota 2
+        mock_igdb_game = {
+            "id": 12345,
+            "name": "Dota 2",
+            "cover": {"url": "//images.igdb.com/igdb/image/upload/t_cover_big/example.jpg"}
+        }
+        mock_search.return_value = [mock_igdb_game]
+
+        # Import Steam games
+        imported_counts, warnings = steam.importer("76561197960435530", self.user, "new")
+
+        # Verify games were imported
+        self.assertEqual(imported_counts[MediaTypes.GAME.value], 3)
+
+        # Check that Dota 2 uses IGDB data
+        dota2 = Game.objects.filter(
+            item__title="Dota 2",
+            item__source=Sources.IGDB.value
+        ).first()
+        self.assertIsNotNone(dota2)
+        self.assertEqual(dota2.item.media_id, "12345")
+
+    @patch("requests.get")
+    @patch("app.providers.services.search_media")
+    @patch("django.conf.settings.STEAM_API_KEY", "test-api-key")
+    def test_import_steam_overwrite_mode(self, mock_search, mock_request):
+        """Test Steam import in overwrite mode."""
+        # Create existing game
+        existing_item = Item.objects.create(
+            media_id="steam_570",
+            source=Sources.MANUAL.value,
+            media_type=MediaTypes.GAME.value,
+            title="Dota 2",
+            image="old_image.jpg",
+        )
+        existing_game = Game.objects.create(
+            item=existing_item,
+            user=self.user,
+            status=Status.COMPLETED.value,
+            progress=1000,
+        )
+
+        # Mock Steam API response
+        with open(mock_path / "steam_games.json") as f:
+            steam_data = json.load(f)
+        
+        mock_response = Mock()
+        mock_response.json.return_value = steam_data
+        mock_response.raise_for_status.return_value = None
+        mock_request.return_value = mock_response
+
+        # Mock IGDB search - return empty
+        mock_search.return_value = []
+
+        # Import in overwrite mode
+        imported_counts, warnings = steam.importer("76561197960435530", self.user, "overwrite")
+
+        # Verify games were imported and existing was overwritten
+        self.assertEqual(imported_counts[MediaTypes.GAME.value], 3)
+        self.assertEqual(Game.objects.filter(user=self.user).count(), 3)
+
+        # Check that Dota 2 was updated
+        dota2 = Game.objects.filter(
+            item__title="Dota 2"
+        ).first()
+        self.assertIsNotNone(dota2)
+        self.assertEqual(dota2.status, Status.PLAYING.value)  # Updated status
+        self.assertEqual(dota2.progress, 12345)  # Updated playtime

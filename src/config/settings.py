@@ -368,6 +368,14 @@ COMICVINE_API = config(
     ),
 )
 
+STEAM_API_KEY = config(
+    "STEAM_API_KEY",
+    default=secret(
+        "STEAM_API_KEY_FILE",
+        default=None,
+    ),
+)
+
 TRAKT_API = config(
     "TRAKT_API",
     default=secret(
