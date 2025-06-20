@@ -25,17 +25,6 @@ def get_client_ip(request):
 
 def process_task_result(task):
     """Process task result based on status and format appropriately."""
-    try:
-        if isinstance(task.task_kwargs, str):
-            kwargs = json.loads(task.task_kwargs)
-        else:
-            kwargs = task.task_kwargs
-        mode = kwargs.get("mode", "new")  # Default to 'new' if not specified
-    except (TypeError, json.JSONDecodeError, AttributeError):
-        mode = "new"
-
-    mode = "Only New Items" if mode == "new" else "Overwrite Existing"
-
     if task.status == "FAILURE":
         result_json = json.loads(task.result)
         if result_json["exc_type"] == "MediaImportError":
@@ -65,7 +54,6 @@ def process_task_result(task):
         task.summary = "This task has been queued and is waiting to run."
         task.errors = None
 
-    task.mode = mode  # Add mode to task object
     return task
 
 

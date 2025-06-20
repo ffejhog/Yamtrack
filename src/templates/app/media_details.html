@@ -19,7 +19,7 @@
       <div x-data="{ trackOpen: false }">
         <button class="mt-4 p-3 rounded-lg w-full flex items-center text-white transition duration-300 cursor-pointer {% if user_medias %}bg-indigo-600 hover:bg-indigo-700{% else %}bg-gray-600 hover:bg-gray-700{% endif %}"
                 hx-get="{% media_view_url 'track_modal' media %}"
-                hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ current_instance.id }}", "title": "{{ media.title }}{% if media.season_title %} S{{ media.season_number }}{% endif %}"}'
+                hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "instance_id": "{{ current_instance.id }}"}'
                 hx-target="#{% component_id 'track' media current_instance.id %}"
                 hx-trigger="click"
                 @click="trackOpen = true">
@@ -133,9 +133,17 @@
 
       {# Description #}
       <div class="mb-6">
-        <p class="text-gray-300 text-justify text-pretty {% if media.media_type == MediaTypes.SEASON.value %}line-clamp-4{% else %}line-clamp-5{% endif %}">
-          {{ media.synopsis|linebreaksbr|safe }}
-        </p>
+        <div x-data="{ isExpanded: false, isClamped: false, checkClamp() { const element = this.$refs.synopsisText; this.isClamped = element.scrollHeight > element.clientHeight; } }"
+             x-init="$nextTick(() => checkClamp())">
+          <p x-ref="synopsisText"
+             :class="isExpanded ? '' : '{% if media.media_type == MediaTypes.SEASON.value %}line-clamp-4{% else %}line-clamp-5{% endif %}'"
+             class="text-gray-300 text-pretty">{{ media.synopsis|linebreaksbr|safe }}</p>
+          <button x-show="isClamped"
+                  @click="isExpanded = !isExpanded"
+                  class="text-indigo-400 hover:text-indigo-300 text-sm mt-2 focus:outline-none transition-colors cursor-pointer">
+            <span x-text="isExpanded ? 'Show less' : 'Read more'"></span>
+          </button>
+        </div>
 
         {% if current_instance.notes %}
           <div class="my-3 border-t border-gray-700"></div>
@@ -157,7 +165,17 @@
             <div class="font-medium text-gray-400 mb-1">YOUR NOTES</div>
           </div>
 
-          <p class="text-gray-300 italic line-clamp-2">"{{ current_instance.notes|linebreaksbr }}"</p>
+          <div x-data="{ isExpanded: false, isClamped: false, checkClamp() { const element = this.$refs.notesText; this.isClamped = element.scrollHeight > element.clientHeight; } }"
+               x-init="$nextTick(() => checkClamp())">
+            <p x-ref="notesText"
+               :class="isExpanded ? '' : 'line-clamp-2'"
+               class="text-gray-300 italic">"{{ current_instance.notes|linebreaksbr }}"</p>
+            <button x-show="isClamped"
+                    @click="isExpanded = !isExpanded"
+                    class="text-indigo-400 hover:text-indigo-300 text-xs mt-1 focus:outline-none transition-colors cursor-pointer">
+              <span x-text="isExpanded ? 'Show less' : 'Read more'"></span>
+            </button>
+          </div>
         {% endif %}
       </div>
 
@@ -280,7 +298,7 @@
             <div x-data="{ trackOpen: false }">
               <button class="p-2  text-white rounded-md bg-indigo-600 hover:bg-indigo-700 transition-colors cursor-pointer"
                       hx-get="{% media_view_url 'track_modal' media %}"
-                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true, "title": "{{ media.title }}{% if media.season_title %} S{{ media.season_number }}{% endif %}"}'
+                      hx-vals='{"return_url": "{{ request.get_full_path|urlencode }}", "is_create": true}'
                       hx-target="#{% component_id 'track' media %}"
                       hx-trigger="click once"
                       @click="trackOpen = true"
@@ -319,14 +337,14 @@
               {% if current_instance.start_date %}
                 <div class="flex @max-[210px]:flex-col justify-between text-sm">
                   <span class="text-gray-400">Started:</span>
-                  <span class="text-gray-200">{{ current_instance.start_date|date:"DATETIME_FORMAT" }}</span>
+                  <span class="text-gray-200">{{ current_instance.start_date|date_tracker_format }}</span>
                 </div>
               {% endif %}
 
               {% if current_instance.end_date %}
                 <div class="flex @max-[210px]:flex-col justify-between text-sm">
                   <span class="text-gray-400">Ended:</span>
-                  <span class="text-gray-200">{{ current_instance.end_date|date:"DATETIME_FORMAT" }}</span>
+                  <span class="text-gray-200">{{ current_instance.end_date|date_tracker_format }}</span>
                 </div>
               {% endif %}
 
@@ -362,10 +380,9 @@
                 Show Repeats ({{ user_medias|length|add:"-1" }})
               </button>
 
-              <div x-show="showRepeats" x-collapse class="space-y-2 mt-4">
+              <div x-show="showRepeats" class="space-y-2 mt-4">
                 {% for user_media in user_medias|slice:"1:" %}
                   <div class="bg-[#2a2f35] p-4 rounded-lg">
-                    <!-- Rest of your existing repeat media template -->
                     <div class="flex items-center justify-between mb-2">
                       <div class="flex items-center">
                         <svg xmlns="http://www.w3.org/2000/svg"
@@ -433,17 +450,18 @@
                       {% endif %}
 
                       {% if user_media.start_date %}
-                        <div class="text-xs text-gray-400">Started: {{ user_media.start_date|date:"DATETIME_FORMAT" }}</div>
+                        <div class="text-xs text-gray-400">Started: {{ user_media.start_date|date_tracker_format }}</div>
                       {% endif %}
 
                       {% if user_media.end_date %}
-                        <div class="text-xs text-gray-400">Finished: {{ user_media.end_date|date:"DATETIME_FORMAT" }}</div>
+                        <div class="text-xs text-gray-400">Finished: {{ user_media.end_date|date_tracker_format }}</div>
                       {% endif %}
 
                       {% if user_media.notes %}
                         <div class="flex items-start mt-3"
-                             x-data="{ isExpanded: false, isClamped: false, checkClamp() { const element = this.$refs.notesText; this.isClamped = element.scrollHeight > element.clientHeight; } }"
-                             x-init="$nextTick(() => checkClamp())">
+                             x-data="{ isExpanded:false, isClamped:false, measure(){ const el = this.$refs.notesText; this.isClamped = el.scrollHeight > el.clientHeight }, rafMeasure(){ requestAnimationFrame(() => this.measure()) }, reset(){ this.isExpanded = false; this.$nextTick(() => this.rafMeasure()) } }"
+                             x-init="rafMeasure(); $watch('showRepeats', v => { if (v) reset() })">
+
                           <svg xmlns="http://www.w3.org/2000/svg"
                                width="24"
                                height="24"
@@ -500,9 +518,11 @@
                  stroke-linecap="round"
                  stroke-linejoin="round"
                  class="w-4 h-4">
-              <path d="M12 10v6" />
-              <path d="M9 13h6" />
-              <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+              <path d="M11 12H3"></path>
+              <path d="M16 6H3"></path>
+              <path d="M16 18H3"></path>
+              <path d="M18 9v6"></path>
+              <path d="M21 12h-6"></path>
             </svg>
           </button>
 
@@ -642,10 +662,10 @@
                 <img src="{{ IMG_NONE }}"
                      alt="E{{ episode.episode_number }}"
                      data-src="{{ episode.image }}"
-                     class="lazyload md:w-64 md:max-h-40 flex-shrink-0 {% if episode.image != IMG_NONE %}object-cover{% endif %}">
-                <div class="p-4 flex-1 flex flex-col">
+                     class="lazyload md:w-64 md:h-40 flex-shrink-0 {% if episode.image != IMG_NONE %}object-cover{% endif %}">
+                <div class="py-3 flex-1 flex flex-col">
                   <div class="flex-1">
-                    <div class="flex justify-between items-start mb-2 space-x-2">
+                    <div class="flex justify-between items-start mb-2 space-x-2 px-4">
                       <div>
                         <h2 class="text-xl font-semibold mb-1 line-clamp-1">{{ episode.title }}</h2>
                         <p class="text-sm text-gray-400">
@@ -688,7 +708,7 @@
                             {% endif %}
                           </button>
 
-                          {% include "app/components/fill_track_episode.html" with request=request media=media episode=episode episode_title=episode.title csrf_token=csrf_token only %}
+                          {% include "app/components/fill_track_episode.html" with request=request media=media episode=episode episode_title=episode.title csrf_token=csrf_token TRACK_TIME=TRACK_TIME only %}
 
                         </div>
 
@@ -744,9 +764,12 @@
                                  stroke-width="2"
                                  stroke-linecap="round"
                                  stroke-linejoin="round">
-                              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                              <path d="M3 3v5h5"></path>
-                              <path d="M12 7v5l4 2"></path>
+                              <path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path>
+                              <path d="M16 2v4"></path>
+                              <path d="M8 2v4"></path>
+                              <path d="M3 10h5"></path>
+                              <path d="M17.5 17.5 16 16.3V14"></path>
+                              <circle cx="16" cy="16" r="6"></circle>
                             </svg>
                           </button>
                           <div x-show="historyOpen"
@@ -760,11 +783,13 @@
                         </div>
                       </div>
                     </div>
-                    <p class="text-sm text-gray-300 line-clamp-2 text-justify text-pretty">{{ episode.overview }}</p>
+                    <div class="{% if episode.history %}md:h-[calc(2*1.5rem)]{% else %}md:h-[calc(3*1.5rem)]{% endif %} md:overflow-y-auto px-4">
+                      <p class="text-sm text-gray-300 leading-relaxed text-pretty">{{ episode.overview }}</p>
+                    </div>
                   </div>
                   {% if episode.history %}
-                    <p class="text-xs text-gray-400 mt-2">
-                      Last watched: {{ episode.history.0.end_date|date:"DATETIME_FORMAT" }}
+                    <p class="text-xs text-gray-400 mt-2 px-4">
+                      Last watched: {{ episode.history.0.end_date|date_tracker_format|default_if_none:"No date provided" }}
                       {% if episode.history|length > 1 %}• Watched {{ episode.history|length }} times{% endif %}
                     </p>
                   {% endif %}
